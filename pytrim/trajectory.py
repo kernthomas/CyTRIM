@@ -7,6 +7,8 @@ from select_recoil import get_recoil_position
 from scatter import scatter
 from estop import eloss
 from geometry import is_inside_target
+import numpy as np
+import cython
 
 def setup():
     """Setup module variables.
@@ -22,7 +24,18 @@ def setup():
     EMIN = 5.0  # eV
 
 
-def trajectory(pos_init, dir_init, e_init):
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+@cython.locals(
+    e=cython.double,
+    dee=cython.double,
+    free_path=cython.double,
+    is_inside=cython.bint,
+    i=cython.int
+)
+@cython.ccall  # Python-callable when compiled; no-op under plain Python
+def trajectory(pos_init: np.ndarray, dir_init: np.ndarray, e_init: cython.double):
     """Simulate one trajectory.
     
     Parameters:
@@ -38,18 +51,24 @@ def trajectory(pos_init, dir_init, e_init):
             False otherwise
     """
     pos = pos_init.copy()
-    dir = dir_init.copy()
+    direction = dir_init.copy()
     e = e_init
     is_inside = True
 
     while e > EMIN:
-        free_path, p, dirp, _ = get_recoil_position(pos, dir)
+        free_path, p, dirp, _ = get_recoil_position(pos, direction)
+
         dee = eloss(e, free_path)
         e -= dee
-        pos += free_path * dir
+
+        # pos += free_path * direction   (no NumPy broadcasting/temporaries)
+        for i in range(3):
+            pos[i] += free_path * direction[i]
+
         if not is_inside_target(pos):
             is_inside = False
             break
-        dir, e, _, _ = scatter(e, dir, p, dirp)
 
-    return pos, dir, e, is_inside
+        direction, e, _, _ = scatter(e, direction, p, dirp)
+
+    return pos, direction, e, is_inside

@@ -8,6 +8,7 @@ Available functions:
     eloss: calculate the electronic energy loss.
 """
 from math import sqrt
+import cython
 
 
 def setup(corr_lindhard, z1, m1, z2, density):
@@ -30,7 +31,18 @@ def setup(corr_lindhard, z1, m1, z2, density):
     DENSITY = density
 
 
-def eloss(e, free_path):
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+@cython.locals(
+    e=cython.double,
+    free_path=cython.double,
+    dee=cython.double,
+    f=cython.double,
+    rho=cython.double
+)
+@cython.ccall  # Python-callable when compiled; no-op under plain Python
+def eloss(e: cython.double, free_path: cython.double):
     """Calculate the electronic energy loss over a given free path length.
 
     Parameters:
@@ -40,8 +52,12 @@ def eloss(e, free_path):
     Returns:
         float: energy loss (eV)
     """
-    dee = FAC_LINDHARD * DENSITY * sqrt(e) * free_path
+
+    # Copy globals into typed locals (avoids Python lookups when compiled)
+    f = FAC_LINDHARD
+    rho = DENSITY
+
+    dee = f * rho * sqrt(e) * free_path
     if dee > e:
         dee = e
-
     return dee
