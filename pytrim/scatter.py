@@ -10,8 +10,9 @@ Available functions:
     scatter: treat a scattering event.
 """
 
-from math import sqrt, exp
+from math import sqrt, exp, pow
 import numpy as np
+import cython
 
 
 def setup(z1, m1, z2, m2):
@@ -36,22 +37,31 @@ def setup(z1, m1, z2, m2):
         
         
 # Constants for ZBL screening function
-A1 = 0.18175
-A2 = 0.50986
-A3 = 0.28022
-A4 = 0.02817
+A1 = cython.declare(cython.double, 0.18175)
+A2 = cython.declare(cython.double, 0.50986)
+A3 = cython.declare(cython.double, 0.28022)
+A4 = cython.declare(cython.double, 0.02817)
 
-B1 = 3.1998
-B2 = 0.94229
-B3 = 0.4029
-B4 = 0.20162
+B1 = cython.declare(cython.double, 3.1998)
+B2 = cython.declare(cython.double, 0.94229)
+B3 = cython.declare(cython.double, 0.4029)
+B4 = cython.declare(cython.double, 0.20162)
 
-A1B1 = A1 * B1
-A2B2 = A2 * B2
-A3B3 = A3 * B3
-A4B4 = A4 * B4
+A1B1 = cython.declare(cython.double, A1 * B1)
+A2B2 = cython.declare(cython.double, A2 * B2)
+A3B3 = cython.declare(cython.double, A3 * B3)
+A4B4 = cython.declare(cython.double, A4 * B4)
 
-def ZBLscreen(r):
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+@cython.locals(
+    r=cython.double,
+    exp1=cython.double, exp2=cython.double, exp3=cython.double, exp4=cython.double,
+    screen=cython.double, dscreen=cython.double,
+)
+@cython.ccall  # Python-callable when compiled; no-op under plain Python
+def ZBLscreen(r: cython.double):
     """Calculate the ZBL screening function and its derivative.
 
     Parameters:
@@ -72,14 +82,27 @@ def ZBLscreen(r):
 
 
 # Constants for apsis estimation for the ZBL potential
-K2 = 0.38           # factor of the 1/R part
-K3 = 7.2            # factor of the 1/R^3 part
-K1 = 1/(4*K2)
-R12sq = (2*K2)**2
-R23sq = K3 / K2
-NITER = 1           # number of Newton-Raphson iterations
+K2   = cython.declare(cython.double, 0.38)     # factor of 1/R
+K3   = cython.declare(cython.double, 7.2)      # factor of 1/R^3
+K1   = cython.declare(cython.double, 1.0 / (4.0 * K2))
+R12sq= cython.declare(cython.double, (2.0 * K2) * (2.0 * K2))
+R23sq= cython.declare(cython.double, K3 / K2)
+NITER= cython.declare(cython.int, 1)           # Newton steps
+TOL  = cython.declare(cython.double, 1e-4)     # residual tolerance
 
-def estimate_apsis(e, p):
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+@cython.locals(
+    e=cython.double, p=cython.double,
+    psq=cython.double, r0sq=cython.double, r0=cython.double,
+    screen=cython.double, dscreen=cython.double,
+    numerator=cython.double, denominator=cython.double,
+    residuum=cython.double,
+    it=cython.int
+)
+@cython.ccall
+def estimate_apsis(e: cython.double, p: cython.double):
     """Estimate the distance of closest approach (apsis) in a colllision.
 
     Parameters:
@@ -89,39 +112,68 @@ def estimate_apsis(e, p):
     Returns:
         float: Estimated apsis of the collision (RNORM)
     """
-    psq = p**2
-    r0sq = 0.5 * (psq + sqrt(psq**2 + 4*K3/e))
+    psq = p * p
+    r0sq = 0.5 * (psq + sqrt(psq * psq + 4.0 * K3 / e))
 
     if r0sq < R23sq:
-        r0sq = psq + K2/e
+        r0sq = psq + K2 / e
         if r0sq < R12sq:
-            r0 = (1 + sqrt(1 + 4*e*(e+K1)*psq)) / (2*(e+K1))
+            # (1 + sqrt(1 + 4*e*(e+K1)*psq)) / (2*(e+K1))
+            ek = e + K1
+            inside = 1.0 + 4.0 * e * ek * psq
+            if inside < 0.0:
+                inside = 0.0  # guard tiny negative from FP
+            r0 = (1.0 + sqrt(inside)) / (2.0 * ek)
         else:
+            if r0sq < 0.0:
+                r0sq = 0.0
             r0 = sqrt(r0sq)
     else:
+        if r0sq < 0.0:
+            r0sq = 0.0
         r0 = sqrt(r0sq)
-    
-    # Do Newton-Raphson iterations to improve the estimate
-    for _ in range(NITER):
-        screen, dscreen = ZBLscreen(r0)
-        numerator = r0*(r0-screen/e) - p**2
-        denominator = 2*r0 - (screen+r0*dscreen)/e
-        r0 -= numerator/denominator
 
-        residuum = 1 - screen/(e*r0) - p**2/r0**2
-        if abs(residuum) < 1e-4:
+    # Newton–Raphson refinement (up to NITER steps)
+    it = 0
+    while it < NITER:
+        screen, dscreen = ZBLscreen(r0)
+        numerator   = r0 * (r0 - screen / e) - psq
+        denominator = 2.0 * r0 - (screen + r0 * dscreen) / e
+
+        # Robustness: avoid zero/near-zero denominator
+        if denominator == 0.0:
             break
+        r0 -= numerator / denominator
+
+        # Residual: 1 - screen/(e*r0) - p^2/r0^2
+        # (Use multiplies instead of **)
+        residuum = 1.0 - screen / (e * r0) - (psq / (r0 * r0))
+        if abs(residuum) < TOL:
+            break
+        it += 1
 
     return r0
 
 
-C1 = 0.99229
-C2 = 0.011615
-C3 = 0.007122
-C4 = 14.813
-C5 = 9.3066
+C1 = cython.declare(cython.double, 0.99229)
+C2 = cython.declare(cython.double, 0.011615)
+C3 = cython.declare(cython.double, 0.007122)
+C4 = cython.declare(cython.double, 14.813)
+C5 = cython.declare(cython.double, 9.3066)
 
-def magic(e, p):
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+@cython.locals(
+    e=cython.double, p=cython.double,
+    r0=cython.double, screen=cython.double, dscreen=cython.double,
+    rho=cython.double, sqrte=cython.double,
+    alpha=cython.double, beta=cython.double, gamma=cython.double,
+    a=cython.double, g=cython.double, delta=cython.double,
+    denom=cython.double, cos_half_theta=cython.double
+)
+@cython.ccall  # Python-callable when compiled; a no-op in plain Python
+def magic(e: cython.double, p: cython.double):
     """Calculate CM scattering angle using Biersack's magic formula.
 
     Parameters:
@@ -132,27 +184,51 @@ def magic(e, p):
         float: cosine of half the scattering angle in the center-of-mass 
             system
     """
+
     r0 = estimate_apsis(e, p)
     screen, dscreen = ZBLscreen(r0)
 
-    rho = 2*(e*r0-screen) / (screen/r0-dscreen)
+    rho = 2.0 * (e * r0 - screen) / (screen / r0 - dscreen)
+
     sqrte = sqrt(e)
-    alpha = 1 + C1/sqrte
-    beta = (C2+sqrte) / (C3+sqrte)
-    gamma = (C4+e) / (C5+e)
-    a = 2 * alpha * e * p**beta
-    g = gamma / (sqrt(1+a**2)-a)
-    delta = a * (r0-p) / (1+g)
+    alpha = 1.0 + C1 / sqrte
+    beta  = (C2 + sqrte) / (C3 + sqrte)
+    gamma = (C4 + e) / (C5 + e)
+
+    # a = 2 * alpha * e * p**beta   (non-integer exponent → use libm pow)
+    a = 2.0 * alpha * e * pow(p, beta)
+
+    # g = gamma / (sqrt(1 + a^2) - a)  (stable form)
+    g = gamma / (sqrt(1.0 + a * a) - a)
+
+    # delta = a * (r0 - p) / (1 + g)
+    delta = a * (r0 - p) / (1.0 + g)
 
     cos_half_theta = (p + rho + delta) / (r0 + rho)
-    if cos_half_theta > 1:
+
+    if cos_half_theta > 1.0:
+        # preserve your original warning behavior
         print("Warning: cos_half_theta > 1:", cos_half_theta)
         print("  e =", e, "p =", p, "r0 =", r0, "rho =", rho, "delta =", delta)
 
     return cos_half_theta
 
 
-def scatter(e, dir, p, dirp):
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+@cython.locals(
+    cos_half_theta=cython.double,
+    sin_psi=cython.double, cos_psi=cython.double,
+    a=cython.double, b=cython.double,
+    e_recoil=cython.double,
+    e_new=cython.double,
+    t=cython.int,
+    s=cython.double,
+    n=cython.double
+)
+@cython.ccall  # Python-callable when compiled; a no-op in plain Python
+def scatter(e: cython.double, dir: np.ndarray, p: cython.double, dirp: np.ndarray):
     """Treat a scattering event.
 
     The atomic numbers and masses of the projectile and target enter the
@@ -178,27 +254,46 @@ def scatter(e, dir, p, dirp):
             (size 3)
         float: energy of the projectile after the collision
     """
-    # scattering angle theta in the center-of-mass system
-    cos_half_theta = magic(e/ENORM, p/RNORM)
+    if dir.shape[0] != 3 or dirp.shape[0] != 3:
+        raise ValueError("dir and dirp must be length-3 arrays")
 
-    # directions of the recoil and the projectile after the collision
+    # scattering angle (center-of-mass)
+    cos_half_theta = magic(e / ENORM, p / RNORM)
+
+    # directions of recoil/projectile after collision
+    # Original: dir_recoil = DIRFAC*cos_psi * (cos_psi*dir + sin_psi*dirp)
     sin_psi = cos_half_theta
-    cos_psi = sqrt(1 - sin_psi**2)
-    dir_recoil = DIRFAC * cos_psi * (cos_psi*dir[:] + sin_psi*dirp[:])
-    dir_new = dir - dir_recoil
-    norm = np.linalg.norm(dir_new)
-    if norm == 0:
-        dir_new = dir[:]
-    else:
-        dir_new /= norm
-    norm = np.linalg.norm(dir_recoil)
-    if norm == 0:
-        dir_recoil = dir[:]
-    else:
-        dir_recoil /= norm
+    s = 1.0 - sin_psi * sin_psi
+    if s < 0.0:  # guard tiny negative from roundoff
+        s = 0.0
+    cos_psi = sqrt(s)
 
-    # energy after scattering
-    e_recoil = DENFAC * e * (1 - cos_half_theta**2)
-    e -= e_recoil
+    a = DIRFAC * cos_psi * cos_psi  # scale for dir
+    b = DIRFAC * cos_psi * sin_psi  # scale for dirp
 
-    return dir_new, e, dir_recoil, e_recoil
+    dir_recoil = np.empty(3, dtype=np.float64)
+    dir_new = np.empty(3, dtype=np.float64)
+
+    for t in range(3):
+        dr = a * dir[t] + b * dirp[t]
+        dir_recoil[t] = dr
+        dir_new[t] = dir[t] - dr
+
+    # normalize dir_new
+    n = sqrt(dir_new[0] * dir_new[0] + dir_new[1] * dir_new[1] + dir_new[2] * dir_new[2])
+    dir_new[0] /= n
+    dir_new[1] /= n
+    dir_new[2] /= n
+
+
+    # normalize dir_recoil
+    n = sqrt(dir_recoil[0] * dir_recoil[0] + dir_recoil[1] * dir_recoil[1] + dir_recoil[2] * dir_recoil[2])
+    dir_recoil[0] /= n
+    dir_recoil[1] /= n
+    dir_recoil[2] /= n
+
+    # energies
+    e_recoil = DENFAC * e * (1.0 - cos_half_theta * cos_half_theta)
+    e_new = e - e_recoil
+
+    return dir_new, e_new, dir_recoil, e_recoil
