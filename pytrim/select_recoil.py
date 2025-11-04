@@ -8,8 +8,9 @@ Available functions:
     setup: setup module variables.
     get_recoil_position: get the recoil position.
 """
-from math import sqrt, sin, cos
+from math import sqrt, sin, cos, pi
 import numpy as np
+import cython
 
 
 def setup(density):
@@ -27,47 +28,87 @@ def setup(density):
     PMAX = MEAN_FREE_PATH / sqrt(np.pi)
 
 
-def get_recoil_position(pos, dir):
-    """Get the recoil position based on the projectile position and direction.
-
-    Parameters:
-        pos (ndarray): position of the projectile (size 3)
-        dir (ndarray): direction vector of the projectile (size 3)
-
-    Returns:
-        float: free path length to the next collision (A)
-        float: impact parameter = distance between collision point and 
-            recoil (A)
-        ndarray: direction vector from collision point to recoil (size 3)
-        ndarray: position of the recoil (size 3)
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.cdivision(True)
+@cython.locals(
+    free_path=cython.double,
+    p=cython.double,
+    fi=cython.double,
+    cos_fi=cython.double, sin_fi=cython.double,
+    cos_alpha=cython.double, sin_alpha=cython.double,
+    cos_phi=cython.double,  sin_phi=cython.double,
+    norm=cython.double,
+    i=cython.int, j=cython.int, k=cython.int,
+    t=cython.int,
+    di=cython.double, dj=cython.double,
+    a0=cython.double, a1=cython.double, a2=cython.double,
+)
+@cython.ccall  # Python-callable when compiled; no-op under plain Python
+def get_recoil_position(pos: np.ndarray, dir: np.ndarray):
     """
-    free_path = MEAN_FREE_PATH
-    pos_collision = pos[:] + free_path * dir[:]
+    Get the recoil position based on the projectile position and direction.
 
-    p = PMAX * sqrt(np.random.rand())
-    # Azimuthal angle fi
-    fi = 2 * np.pi * np.random.rand()
+    Parameters
+    ----------
+    pos : ndarray, shape (3,)
+    dir : ndarray, shape (3,)
+
+    Returns
+    -------
+    free_path : float
+    p         : float
+    dirp      : ndarray, shape (3,)
+    pos_recoil: ndarray, shape (3,)
+    """
+    if pos.shape[0] != 3 or dir.shape[0] != 3:
+        raise ValueError("pos and dir must be length-3 arrays")
+
+    free_path = MEAN_FREE_PATH
+
+    # Random draws
+    p  = PMAX * sqrt(float(np.random.random()))
+    fi = 2.0 * pi * float(np.random.random())
     cos_fi = cos(fi)
     sin_fi = sin(fi)
 
-    # Convert direction vector to polar angles
-    k = np.argmin( np.abs(dir[:]) )   # make k point to the smallest dir(:) so sinalf > sqrt(2/3)
+    # Choose k = argmin(|dir|) so sin(alpha) stays large
+    a0 = abs(dir[0]); a1 = abs(dir[1]); a2 = abs(dir[2])
+    if a1 < a0:
+        k = 1; a0 = a1
+    else:
+        k = 0
+    if a2 < a0:
+        k = 2
+
     i = (k + 1) % 3
     j = (i + 1) % 3
-    cos_alpha = dir[k]
-    sin_alpha = sqrt( dir[i]**2 + dir[j]**2 )
-    cos_phi = dir[i] / sin_alpha
-    sin_phi = dir[j] / sin_alpha
 
-    # direction vector from collision point to recoil
-    dirp = np.empty(3)
-    dirp[i] = cos_fi*cos_alpha*cos_phi - sin_fi*sin_phi
-    dirp[j] = cos_fi*cos_alpha*sin_phi + sin_fi*cos_phi
-    dirp[k] = - cos_fi*sin_alpha
-    norm = np.linalg.norm(dirp)
-    dirp /= norm
+    cos_alpha = float(dir[k])
+    di = float(dir[i]); dj = float(dir[j])
+    sin_alpha = sqrt(di*di + dj*dj)
 
-    # position of the recoil
-    pos_recoil = pos_collision[:] + p * dirp[:]
+    # Guard against exactly axial directions
+    if sin_alpha != 0.0:
+        cos_phi = di / sin_alpha
+        sin_phi = dj / sin_alpha
+    else:
+        cos_phi = 1.0
+        sin_phi = 0.0
+
+    # Recoil direction (unnormalized), then normalize
+    dirp = np.empty(3, dtype=np.float64)
+    dirp[i] =  cos_fi * cos_alpha * cos_phi - sin_fi * sin_phi
+    dirp[j] =  cos_fi * cos_alpha * sin_phi + sin_fi * cos_phi
+    dirp[k] = -cos_fi * sin_alpha
+
+    norm = sqrt(dirp[0]*dirp[0] + dirp[1]*dirp[1] + dirp[2]*dirp[2])
+    if norm != 0.0:
+        dirp[0] /= norm; dirp[1] /= norm; dirp[2] /= norm
+
+    # pos_recoil = (pos + free_path*dir) + p*dirp  (no broadcasting/temps)
+    pos_recoil = np.empty(3, dtype=np.float64)
+    for t in range(3):
+        pos_recoil[t] = pos[t] + free_path * dir[t] + p * dirp[t]
 
     return free_path, p, dirp, pos_recoil
