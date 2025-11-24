@@ -2,6 +2,7 @@
 #include <cmath>
 #include "estop.h"
 #include "recoil.h"
+#include "geometry.h"
 
 
 int main()
@@ -19,6 +20,7 @@ int main()
 
     estop estopInst(corr_lindhard, z1, m1, z2, density);
     recoil recoilInst(density);
+    geometry geometryInst(zmin, zmax);
 
     return 0;
 }
