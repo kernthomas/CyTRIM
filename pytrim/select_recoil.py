@@ -73,7 +73,9 @@ def get_recoil_position(pos: np.ndarray, dir: np.ndarray):
     sin_fi = sin(fi)
 
     # Choose k = argmin(|dir|) so sin(alpha) stays large
-    a0 = abs(dir[0]); a1 = abs(dir[1]); a2 = abs(dir[2])
+    a0 = abs(dir[0])
+    a1 = abs(dir[1])
+    a2 = abs(dir[2])
     if a1 < a0:
         k = 1; a0 = a1
     else:
