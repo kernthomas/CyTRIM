@@ -50,7 +50,7 @@ double scatter::estimate_apsis(double e, double p)
     for(int i=0; i<NITER; i++){
         ZBLscreen(r0, &screen, &dscreen);
         numerator= r0 * (r0 - screen/e) - (p*p);
-        denominator = 2*r0 - (screen+r0+dscreen)/e;
+        denominator = 2*r0 - (screen+r0*dscreen)/e;
         r0 -= numerator/denominator;
 
         residuum = 1 - screen/(e*r0) - (p*p)/(r0*r0);
@@ -84,13 +84,13 @@ double scatter::magic(double e, double p)
     cos_half_theta = (p + rho + delta) / (r0 + rho);
     if(cos_half_theta > 1){
         std::cout << "Warning: cos_half_theta > 1: " << cos_half_theta << "\n";
-        std:: cout << "e =" << e << "p =" << p << "r0 =" << r0 << "rho =" << rho << "delta =" << delta << "\n";
+        std:: cout << "e =" << e << "; p =" << p << "; r0 =" << r0 << "; rho =" << rho << "; delta =" << delta << "\n";
     }
 
     return cos_half_theta;
 }
 
-void scatter::doScatter(double* e, double dir[3], double p, double dirp[3], double dir_new[3], double dir_recoil[3], double* e_recoil)
+void scatter::doScatter(double* e, const dirVector<double, 3>& dir, double p, const dirVector<double, 3>& dirp, dirVector<double, 3>& dir_new, dirVector<double, 3>& dir_recoil, double* e_recoil)
 {
     double cos_half_theta;
     double sin_psi, cos_psi;
@@ -102,30 +102,22 @@ void scatter::doScatter(double* e, double dir[3], double p, double dirp[3], doub
     // directions of the recoil and the projectile after the collision
     sin_psi = cos_half_theta;
     cos_psi = sqrt(1 - sin_psi*sin_psi);
-    for(int i=0; i<3; i++)
-    {
-        dir_recoil[i] = dirfac * cos_psi * (cos_psi * dir[i] + sin_psi * dirp[i]);
-        dir_new[i] = dir[i] - dir_recoil[i];
-        
-        norm += (dir_new[i] * dir_new[i]);
-    }
-    norm = sqrt(norm);
+
+    dir_recoil = (dir * cos_psi + dirp * sin_psi) * cos_psi * dirfac;
+    dir_new = dir - dir_recoil; 
+    norm = dir_new.norm();
 
     if(norm == 0){
-        std::copy(dir, dir+3, dir_new);
+        dir_new = dir;
     } else {
-        for(int i=0; i<3; i++){
-            dir_new[i] = dir_new[i] / norm;
-        }
+        dir_new = dir_new / norm;
     }
 
-    norm = sqrt(dir_recoil[0]*dir_recoil[0] + dir_recoil[1]*dir_recoil[1] + dir_recoil[2]*dir_recoil[2]);
+    norm = dir_recoil.norm();
     if(norm == 0){
-        std::copy(dir, dir+3, dir_recoil);
+        dir_recoil = dir;
     } else{
-        for(int i=0; i<3; i++){
-            dir_recoil[i] = dir_recoil[i] / norm;
-        }
+        dir_recoil = dir_recoil / norm;
     }
 
     *e_recoil = denfac * *e * (1 - cos_half_theta*cos_half_theta);

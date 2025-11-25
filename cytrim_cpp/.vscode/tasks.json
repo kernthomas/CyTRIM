@@ -6,6 +6,10 @@
             "command": "C:/Strawberry/c/bin/g++.exe",
             "args": [
                 "-fdiagnostics-color=always",
+                "-std=c++20",                 // use C++20 (optional but nice)
+                "-O3",                        // high optimization (enables vectorization)
+                "-march=native",              // tune for your CPU (optional)
+                "-fopt-info-vec-optimized",   // show auto-vectorization report
                 "-g",
                 "\"*.cpp\"",
                 "-o",

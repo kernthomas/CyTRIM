@@ -31,7 +31,7 @@ class dirVector{
             return N;
         }
 
-        dirVector operator+(const dirVector &w){
+        dirVector operator+(const dirVector &w) const{
 
             dirVector<T, N> temp;
 
@@ -45,12 +45,37 @@ class dirVector{
             return temp;
         }
 
-        dirVector operator*(const T factor){
+        dirVector operator-(const dirVector &w) const{
+
+            dirVector<T, N> temp;
+
+            if(w.size() != N){
+                throw std::runtime_error("dirVector+: vector sizes don't match!");
+            }
+            
+            for(int i=0; i<N; i++){
+                temp[i] = v[i] - w[i];
+            }
+            return temp;
+        }
+
+        dirVector operator*(const T factor) const{
 
             dirVector<T, N> result;
 
             for(int i=0; i<N; i++){
                 result[i] = factor * v[i];
+            }
+
+            return result;
+        }
+
+        dirVector operator/(const T divisor) const{
+
+            dirVector<T, N> result;
+
+            for(int i=0; i<N; i++){
+                result[i] = v[i] / divisor;
             }
 
             return result;
@@ -68,11 +93,11 @@ class dirVector{
             return result;
         }
 
-        dirVector abs() const{
+        dirVector vectabs() const{
             dirVector<T, N> result;
 
             for(int i=0; i<N; i++){
-                result[i] = abs(v[i]);
+                result[i] = std::abs(v[i]);
             }
 
             return result;

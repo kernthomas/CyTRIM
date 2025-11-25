@@ -44,9 +44,11 @@ def get_recoil_position(pos, dir):
     free_path = MEAN_FREE_PATH
     pos_collision = pos[:] + free_path * dir[:]
 
-    p = PMAX * sqrt(np.random.rand())
+    #p = PMAX * sqrt(np.random.rand())
+    p = PMAX * sqrt(0.5)
     # Azimuthal angle fi
-    fi = 2 * np.pi * np.random.rand()
+    # fi = 2 * np.pi * np.random.rand()
+    fi = 2 * np.pi * 0.5
     cos_fi = cos(fi)
     sin_fi = sin(fi)
 

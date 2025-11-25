@@ -1,4 +1,5 @@
 #pragma once
+#include "dirVector.h"
 
 class geometry{
     private:
@@ -6,5 +7,5 @@ class geometry{
 
     public:
         geometry(double zmin, double zmax);
-        bool is_inside_target(double pos[3]);
+        bool is_inside_target(dirVector<double, 3>& pos);
 };
