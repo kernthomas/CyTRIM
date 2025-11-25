@@ -9,6 +9,8 @@
                 "-O3",
                 "-march=native",
                 "-funroll-loops",
+                "-ftree-vectorize",
+                "-fopt-info-vec",
                 "-fdiagnostics-color=always",
                 "-g",
                 "*.cpp",

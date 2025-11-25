@@ -50,43 +50,27 @@ int main(int argc, char*argv[])
     dirVector<double, 3> pos_init{0.0, 0.0, 0.0};   // position (A)
     dirVector<double, 3> dir_init{0.0, 0.0, 1.0};   // direction (unit vector)
 
-    unsigned long count_inside = 0;
+    unsigned int count_inside = 0;
     double mean_z = 0;
     double std_z = 0;
-
     #pragma omp parallel
     {
-        unsigned long local_count = 0;
-        double local_mean_z = 0;
-        double local_std_z = 0;
-
         // Each thread runs its chunk of the loop
-        #pragma omp for nowait
+        #pragma omp for reduction(+:count_inside, mean_z, std_z)
         for(int i=0; i<nion; i++){
-            dirVector<double, 3> pos;
-            dirVector<double, 3> dir;
             double e;
             bool is_inside;
+            dirVector<double, 3> pos;
+            dirVector<double, 3> dir;
 
             trajectoryDev.simTrajectory(pos_init, dir_init, e_init, pos, dir, &e, &is_inside);
 
             if(is_inside){
                 count_inside++;
-                local_mean_z += pos[2];
-                local_std_z += pos[2]*pos[2];
+                mean_z += pos[2];
+                std_z += pos[2]*pos[2];
             }
         }
-    
-
-        #pragma omp atomic
-        count_inside += local_count;
-
-        #pragma omp atomic
-        mean_z += local_mean_z;
-
-        #pragma omp atomic
-        std_z += local_std_z;
-
     }
 
     mean_z /= count_inside;
