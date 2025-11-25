@@ -1,6 +1,7 @@
 #include <iostream>
 #include <chrono>
 #include <cmath>
+#include <omp.h>
 #include "estop.h"
 #include "recoil.h"
 #include "geometry.h"
@@ -52,19 +53,40 @@ int main(int argc, char*argv[])
     unsigned long count_inside = 0;
     double mean_z = 0;
     double std_z = 0;
-    dirVector<double, 3> pos;
-    dirVector<double, 3> dir;
-    double e;
-    bool is_inside;
 
-    for(int i=0; i<nion; i++){
-        trajectoryDev.simTrajectory(pos_init, dir_init, e_init, pos, dir, &e, &is_inside);
+    #pragma omp parallel
+    {
+        unsigned long local_count = 0;
+        double local_mean_z = 0;
+        double local_std_z = 0;
 
-        if(is_inside){
-            count_inside++;
-            mean_z += pos[2];
-            std_z += pos[2]*pos[2];
+        // Each thread runs its chunk of the loop
+        #pragma omp for nowait
+        for(int i=0; i<nion; i++){
+            dirVector<double, 3> pos;
+            dirVector<double, 3> dir;
+            double e;
+            bool is_inside;
+
+            trajectoryDev.simTrajectory(pos_init, dir_init, e_init, pos, dir, &e, &is_inside);
+
+            if(is_inside){
+                count_inside++;
+                local_mean_z += pos[2];
+                local_std_z += pos[2]*pos[2];
+            }
         }
+    
+
+        #pragma omp atomic
+        count_inside += local_count;
+
+        #pragma omp atomic
+        mean_z += local_mean_z;
+
+        #pragma omp atomic
+        std_z += local_std_z;
+
     }
 
     mean_z /= count_inside;
